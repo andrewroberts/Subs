@@ -42,6 +42,8 @@
  - Check for error message in tests
  - Stop user from being able to subscribe for another trial
  - What state to leave in after an error??
+ - What happens to the timer if a sub is cancelled - 
+ - Add "trial finished" to updateProperties()
 
 */
 
@@ -71,10 +73,10 @@ var SUBS_EVENT = Object.freeze({
 // Private Config
 // --------------
 
-var PROPERTY_STATE_         = SCRIPT_NAME + '_State'         // String SUBS_STATE
-var PROPERTY_TIME_STARTED_  = SCRIPT_NAME + '_Time_Started'  // Number mS
-var PROPERTY_TRIAL_         = SCRIPT_NAME + '_Trial'         // boolean
-var PROPERTY_TRIAL_EXPIRED_ = SCRIPT_NAME + '_Trial_Expired' // 'true' or not-set (null)
+var PROPERTY_STATE_          = SCRIPT_NAME + '_State'         // String SUBS_STATE
+var PROPERTY_TIME_STARTED_   = SCRIPT_NAME + '_Time_Started'  // Number mS
+var PROPERTY_TRIAL_          = SCRIPT_NAME + '_Trial'         // boolean
+var PROPERTY_TRIAL_FINISHED_ = SCRIPT_NAME + '_Trial_Finished' // 'true' or not-set (null)
 
 var MS_PER_DAY_ = 1000 * 60 * 60 * 24
 
@@ -246,7 +248,7 @@ var Subs_ = (function(ns) {
   ns.isTrialFinished = function() {
   
     this.log.functionEntryPoint()
-    var trialFinished = this.properties.getProperty(PROPERTY_TRIAL_EXPIRED_)
+    var trialFinished = this.properties.getProperty(PROPERTY_TRIAL_FINISHED_)
     return (trialFinished === 'true') ? true : false
   
   } // Subs_.isTrialFinished()
@@ -362,11 +364,15 @@ var Subs_ = (function(ns) {
 
       log.functionEntryPoint()
       
-      if (config.oldTrial && self.isTrialFinished()) {
+      var trialFinished = self.isTrialFinished()
+      
+      if (config.oldTrial && trialFinished) {
         return 'The user has already had one trial'
       }
       
-      return updateProperties(event.trial, SUBS_STATE.STARTED, (new Date()).getTime())
+      var timerStartedAt = (new Date()).getTime()
+      
+      return updateProperties(event.trial, SUBS_STATE.STARTED, timerStartedAt)
     
     } // Subs_.processEvent.started()
 
@@ -390,7 +396,7 @@ var Subs_ = (function(ns) {
       log.functionEntryPoint()
       
       // Ensure the user can only use the trial once
-      self.properties.setProperty(PROPERTY_TRIAL_EXPIRED_, 'true')
+      self.properties.setProperty(PROPERTY_TRIAL_FINISHED_, 'true')
       
       return updateProperties(null, SUBS_STATE.EXPIRED, null)
     
@@ -415,61 +421,97 @@ var Subs_ = (function(ns) {
      * @param {number | object} timeStarted or null to delete
      */ 
 
-    function updateProperties(newTrial, newState, newTimeStarted) {
+    function updateProperties(newTrial, newState, newTimeStarted, trialFinished) {
     
       log.functionEntryPoint()
+      
       log.fine('newTrial: %s', newTrial)      
       log.fine('newState: %s', newState)
       log.fine('newTimeStarted: %s', newTimeStarted)
-
+      log.fine('trialFinished: %s', trialFinished)
+      
       var properties = self.properties
 
       // Status
+      // ------
       
-      properties.setProperty(PROPERTY_STATE_, newState)
+      set(PROPERTY_STATE_, newState)
       
-      // Trial
+      // isTrial
+      // -------
       
       if (typeof newTrial === 'boolean') {
       
-        properties.setProperty(PROPERTY_TRIAL_, newTrial)
+        set(PROPERTY_TRIAL_, newTrial)
         
       } else if (typeof newTrial === 'object') {
         
         if (newTrial === null) {
         
-          properties.deleteProperty(PROPERTY_TRIAL_)     
+          deleteP(PROPERTY_TRIAL_)     
           
         } else {
-        
-          self.throwError('Trying to set "trial" to bad object')
+         
+          error('Trying to set "trial" to bad object')
         }
         
       } else {
       
-        self.throwError('Trying to set "trial" to bad type')      
+        error('Trying to set "trial" to bad type')      
+      }
+      
+      // Trial finished
+      // --------------
+
+      if (trialFinished) {
+        set(PROPERTY_TRIAL_FINISHED_, 'true') 
       }
       
       // Time started
+      // ------------
       
       if (typeof newTimeStarted === 'number') {
       
-        properties.setProperty(PROPERTY_TIME_STARTED_, newTimeStarted)
+        set(PROPERTY_TIME_STARTED_, newTimeStarted)
       
       } else if (typeof newTimeStarted === 'object') {
         
         if (newTimeStarted === null) {
         
-          properties.deleteProperty(PROPERTY_TIME_STARTED_)      
+          deleteP(PROPERTY_TIME_STARTED_)      
           
         } else {
         
-          self.throwError('Trying to set "trial" to bad object')
+          error('Trying to set "trial" to bad object')
         }
       }
       
       return ''
+      
+      // Private Functions
+      // -----------------
+      
+      function set(property, value) {
+      
+        log.functionEntryPoint()
+        properties.setProperty(property, value)
+      
+      } // Subs_.processEvent.updateProperties.setProperty()
 
+      function deleteP(property) {
+      
+        log.functionEntryPoint()
+        properties.deleteProperty(property)
+      
+      } // Subs_.processEvent.updateProperties.deleteProperty()
+
+      function error(property) {
+      
+        log.functionEntryPoint()
+        self.throwError(property)
+      
+      } // Subs_.processEvent.updateProperties.error()
+      
     } // Subs_.processEvent.updateProperties()
 
   } // Subs_.processEvent_()
