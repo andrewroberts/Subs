@@ -34,7 +34,7 @@
  TODO
  ----
 
- - Set PROPERTY_TRIAL_LENGTH_ & PROPERTY_FULL_LENGTH_
+ - Set PROPERTY_.TRIALLENGTH_ & PROPERTY_FULL_LENGTH_
  - Test trial expiration
  - Test trying to get two trials
  - Think about which situations warrant throwing an error, and which passing an
@@ -44,16 +44,19 @@
  - What state to leave in after an error??
  - What happens to the timer if a sub is cancelled - 
  - Add "trial finished" to updateProperties()
+ - Start/stop expiration timer
+ - Do we need the null states, rather than just true or false
 
 */
 
 // Global Config
 // -------------
 
-var SCRIPT_NAME = "Subs"
+var SCRIPT_NAME    = "Subs"
 var SCRIPT_VERSION = "v1.0.dev"
 
 // The number is used as an index into an action table
+
 var SUBS_STATE = Object.freeze({
   NOSUB:     0, // Not subscribed - trial or full
   STARTED:   1, // User subscribed 
@@ -62,6 +65,9 @@ var SUBS_STATE = Object.freeze({
 })
 
 var EVENT_OFFSET_ = 100
+
+// Although this is just used as an index it is given an offset so as not to be 
+// accidentally confused with the state values
 
 var SUBS_EVENT = Object.freeze({
   START:       EVENT_OFFSET_ + 0, // User started subscription - trial or full
@@ -73,10 +79,14 @@ var SUBS_EVENT = Object.freeze({
 // Private Config
 // --------------
 
-var PROPERTY_STATE_          = SCRIPT_NAME + '_State'         // String SUBS_STATE
-var PROPERTY_TIME_STARTED_   = SCRIPT_NAME + '_Time_Started'  // Number mS
-var PROPERTY_TRIAL_          = SCRIPT_NAME + '_Trial'         // boolean
-var PROPERTY_TRIAL_FINISHED_ = SCRIPT_NAME + '_Trial_Finished' // 'true' or not-set (null)
+var PROPERTY_ = Object.freeze({
+  STATE          : SCRIPT_NAME + '_State',          // {SUBS_STATE}
+  TIMER          : SCRIPT_NAME + '_Timer',          // {number} mS
+  TRIAL          : SCRIPT_NAME + '_Trial',          // {boolean}
+  TRIAL_FINISHED : SCRIPT_NAME + '_Trial_Finished', // {boolean} 
+})
+
+var TIMER_NOT_STARTED = -1
 
 var MS_PER_DAY_ = 1000 * 60 * 60 * 24
 
@@ -145,164 +155,205 @@ var Subs_ = (function(ns) {
    */
    
   ns.get = function(config) {
-  
-    if (!config.hasOwnProperty('properties')) {
-      this.throwError('config.properties not defined')
-    }
-     
-    var newSub = Object.create(this)
-    
+
+    var self = this
+
+    this.log = config.log || Log_
+    var log = this.log
+    log.functionEntryPoint()
+
+    checkProperties()
     this.properties = config.properties
     
-    this.log = config.log || Log_
+    var OVERWRITE      = true
+    var DONT_OVERWRITE = false
     
-    if (!config.hasOwnProperty('trialLength')) {
-      this.log.warning('Using default trial length: ' + (DEFAULT_TRIAL_LENGTH_ / MS_PER_DAY_))
-      this.trialLength = DEFAULT_TRIAL_LENGTH_
-    } else {
-      this.trialLength = config.trialLength
-    }
+    initialiseProperty(PROPERTY_.STATE, SUBS_STATE.NOSUB , OVERWRITE)
+    initialiseProperty(PROPERTY_.TIMER, TIMER_NOT_STARTED, OVERWRITE)
+    initialiseProperty(PROPERTY_.TRIAL, false            , OVERWRITE)
+    
+    // PROPERTY_.TRIAL_FINISHED is persistent for this user so only initialise
+    // if it hasn't been set yet
+    initialiseProperty(PROPERTY_.TRIAL_FINISHED, false, DONT_OVERWRITE)
+     
+    initialiseSubLength('trialLength', DEFAULT_TRIAL_LENGTH_)
+    initialiseSubLength('fullLength', DEFAULT_FULL_LENGTH_)
+ 
+    this.log.fine('New Subs: ' + JSON.stringify(this))
+    
+    return Object.create(this)
+    
+    // Private Functions
+    // -----------------
 
-    if (!config.hasOwnProperty('fullLength')) {
-      this.log.warning('Using default full length: ' + (DEFAULT_FULL_LENGTH_ / MS_PER_DAY_))
-      this.fullLength = DEFAULT_FULL_LENGTH_
-    } else {
-      this.fullLength = config.trialLength
-    }
+    /**
+     * Check that a properties object has been passed 
+     */
+     
+    function checkProperties() {
     
-    return newSub
-    
-  } // Subs_.get
+      log.functionEntryPoint()
+  
+      if (!config.hasOwnProperty('properties')) {     
+        throw new Error('config.properties not defined')
+      }
+      
+    } // Subs_.get.checkProperties()
+
+    /**
+     * Intialise the properties that are held externally
+     *
+     * @param {PROPERTY_} name
+     * @param {object} value
+     * @param {boolean} overwrite
+     */
+     
+    function initialiseProperty(name, value, overwrite) {
+
+      log.functionEntryPoint()
+
+      var properties = self.properties
+
+      if (properties.getProperty(name) !== null && !overwrite) {
+        return
+      }
+
+      properties.setProperty(name, value)
+
+    } // Subs_.get.initialiseProperty()
+
+    /**
+     * Initialise the subscription length
+     *
+     * @param {string} name
+     * @param {number} defaultValue
+     */
+     
+    function initialiseSubLength(name, defaultValue) {
+
+      log.functionEntryPoint()
+
+      if (!config.hasOwnProperty(name)) {
+      
+        self.log.warning('Using default ' + name + ': ' + (defaultValue / MS_PER_DAY_))
+        self[name] = defaultValue
+        
+      } else {
+      
+        self[name] = config[name]
+      }
+      
+    } // Subs_.get.initialiseSubLength()
+
+  } // Subs_.get()
 
   /**
-   * Get User subscription status
+   * Get user subscription state
    *
-   * @return {SUBS_STATE} status
+   * @return {SUBS_STATE} state
    */
    
   ns.getState = function() {
   
+    checkInitialised(this)
     this.log.functionEntryPoint()
     
-    var state = this.properties.getProperty(PROPERTY_STATE_)
+    var state = parseInt(this.properties.getProperty(PROPERTY_.STATE), 10)
     
-    if (state === null) {
-    
-      state = SUBS_STATE.NOSUB
-      
-    } else {
-    
-      var stateNumber = parseInt(state, 10)
-      
-      if (stateNumber !== stateNumber) { // Test for NaN
-      
-        this.throwError('Subs state is corrupt: ' +  state)
-        
-      } else {
-      
-        state = stateNumber
-      }
+    if (state !== state) {  
+      throw new Error('Subs state is not a number: ' +  state)
     }
     
+    if (state >= Object.keys(SUBS_STATE).length) {
+      throw new Error('Subs state is outside expected range: ' +  state)
+    }
+   
     this.log.fine('state: ' + state)
     return state
   
   } // Subs_.getState() 
   
   /**
-   * Is this a trial or not
-   *
-   * @return {boolean | object} is this a trial or not or {Object} null
+   * @return {boolean} whether this is a trial
    */
-   
+     
   ns.isTrial = function() {
   
+    checkInitialised(this)
     this.log.functionEntryPoint()
-
-    var trial = this.properties.getProperty(PROPERTY_TRIAL_)
     
-    if (trial !== null) {
+    var trial = this.properties.getProperty(PROPERTY_.TRIAL)
     
-      if (trial === 'true') {
-      
-        trial = true
-        
-      } else if (trial === 'false') {
-        
-        trial = false
-        
-      } else {
-      
-        this.throwError('Corrupt "trial": ' + trial)
-      }
+    if (typeof trial !== 'string') {
+      throw new Error('Sub has not been initialsed, call Subs_.get() first')
     }
-    
+
+    trial = castBoolean(trial)
+    this.log.fine('isTrial: ' + trial)
     return trial
   
   } // Subs_.isTrial() 
 
   /**
-   * @return {boolean} Whether the trial has finished
+   * @return {boolean} Whether the user has already has a trial
    */
 
   ns.isTrialFinished = function() {
   
+    checkInitialised(this)  
     this.log.functionEntryPoint()
-    var trialFinished = this.properties.getProperty(PROPERTY_TRIAL_FINISHED_)
-    return (trialFinished === 'true') ? true : false
+
+    var trialFinished = this.properties.getProperty(PROPERTY_.TRIAL_FINISHED)
+
+    if (typeof trialFinished !== 'string') {
+      throw new Error('Sub has not been initialsed, call Subs_.get() first')
+    }
+
+    trialFinished = castBoolean(trialFinished)
+    this.log.fine('trialFinished: ' + trialFinished)
+    return trialFinished
   
   } // Subs_.isTrialFinished()
-
 
   /**
    * Get the time the subscription timer started
    *
-   * @return {Number} ms since start or {Object} null
+   * @return {number} ms since start or -1 if not started
    */
    
-  ns.getTimeStarted = function() {
+  ns.getTimeTimerStarted = function() {
   
+    checkInitialised(this)  
     this.log.functionEntryPoint()
 
-    var timeStarted = this.properties.getProperty(PROPERTY_TIME_STARTED_)
-    
-    if (timeStarted !== null) {
-    
-      var timeStartedNumber = parseInt(timeStarted, 10)
+    var timeStarted = parseFloat(this.properties.getProperty(PROPERTY_.TIMER))
       
-      if (timeStartedNumber !== timeStartedNumber) { // Test for NaN
-      
-        this.throwError('Subs time started is corrupt: ' +  timeStarted)
-        
-      } else {
-      
-        timeStarted = timeStartedNumber
-      }
+    if (timeStarted !== timeStarted) {       
+      throw new Error('Subs time started is not a number: ' +  timeStarted)
     }
     
     return timeStarted
   
-  } // Subs_.getTimeStarted() 
+  } // Subs_.getTimeTimerStarted() 
   
   /**
    * Process a new "subscription" event 
    *
    * @param {Object} event
    *   {SUBS_EVENT_} event
-   *   {boolean} trial
+   *   {boolean} isTrial
    *
    * @return {String} errorMessage or ''
    */
 
   ns.processEvent = function(event) {
   
-    var log = this.log
+    checkInitialised(this)  
+    var log = this.log    
     log.functionEntryPoint()
     log.fine('event: ' + JSON.stringify(event))
     
-    if (event < EVENT_OFFSET_) {
-      this.throwError('Bad event value')
-    }
+    checkParameters()
     
     var self = this
     
@@ -316,43 +367,59 @@ var Subs_ = (function(ns) {
       /* 3. EXPIRED   */  [started,    noAction,     noAction,    noSub ]
     ]
     
-    var config = {
-
-      oldTrial:       Subs_.isTrial(),
-      newTrial:       null,
-
-      oldState:       Subs_.getState(),
-      newState:       null,
-      
-      oldTimeStarted: Subs_.getTimeStarted(),
-      newTimeStarted: null,
-      
-      event:          event.event,
+    var oldConfig = {
+      isTrial         : event.isTrial,
+      isTrialFinished : this.isTrialFinished(),
+      state           : this.getState(),
+      timeStarted     : this.getTimeTimerStarted(),
     }
     
-    this.log.fine('config: ' + JSON.stringify(config))
+    this.log.fine('oldConfig: ' + JSON.stringify(oldConfig))
     
-    if (config.oldState === SUBS_STATE.NOSUB) {
-    
-      if (config.oldTrial) {      
-        this.throwError('The trial flag is set but there is no subscription')
-      }
-    }
-
-    // Call the appropriate action function
-    var errorMessage = SUBS_TABLE[config.oldState][event.event - EVENT_OFFSET_](config)
-    
-    return errorMessage
+    // Call the appropriate action function for this state/event combination
+    return SUBS_TABLE[oldConfig.state][event.event - EVENT_OFFSET_]()
 
     // Private Functions
     // -----------------
 
-    function noAction(config) {
+    /** 
+     * Check the parameters
+     */
+     
+    function checkParameters() {
+    
+      if (typeof event !== 'object') {
+        throw new Error('"event" is not an object: ' + event)      
+      }
+      
+      if (!event.hasOwnProperty('event') || !event.hasOwnProperty('isTrial')) {
+        throw new Error('"event" does not have the expected properties: ' + JSON.stringify(event))            
+      }
+  
+      if (typeof event.event !== 'number') {
+        throw new Error('"event.event" is not a number: ' + event.event)                  
+      }
+  
+      if (typeof event.isTrial !== 'boolean') {
+        throw new Error('"event.trial" is not a boolean: ' + event.isTrial)                  
+      }
+  
+      if (event.event < EVENT_OFFSET_) {
+        throw new Error('Event value is less than the offset: ' + event)
+      }
+      
+    } // Subs_.processEvent.checkParameters()
+    
+    /** 
+     * No action required for this combo, which we don't expect to see
+     */
+    
+    function noAction() {
     
       log.functionEntryPoint()
-      var message = 'Unexpected state (' + config.oldState + ')/Event(' + event.event + ')' 
+      var message = 'Unexpected state/event: ' + oldConfig.state + '/' + event.event 
       log.warning(message)
-      return message
+      return ''
       
     } // Subs_.processEvent.noAction()
     
@@ -360,19 +427,41 @@ var Subs_ = (function(ns) {
      * User is starting a new subscription
      */
     
-    function started(config) {
+    function started() {
 
       log.functionEntryPoint()
+      var message
       
-      var trialFinished = self.isTrialFinished()
+      if (oldConfig.isTrial && oldConfig.isTrialFinished) {
       
-      if (config.oldTrial && trialFinished) {
-        return 'The user has already had one trial'
+        message = 'The user has already had one trial'
+         
+      } else {
+      
+        var datetime
+      
+        if (oldConfig.state === SUBS_STATE.NOSUB || oldConfig.state === SUBS_STATE.EXPIRED) { 
+      
+          // Restart timer
+          datetime = (new Date()).getTime()
+          
+        } else {
+      
+          if (oldConfig.timeStarted !== -1) {
+      
+            // Keep running with the original timer
+            datetime = oldConfig.timeStarted
+            
+          } else {
+          
+            throw new Error('State is ' + oldConfig.state + ' but the timer has not been started')
+          }
+        }
+        
+        message = updateProperties(event.isTrial, SUBS_STATE.STARTED, datetime)
       }
       
-      var timerStartedAt = (new Date()).getTime()
-      
-      return updateProperties(event.trial, SUBS_STATE.STARTED, timerStartedAt)
+      return message
     
     } // Subs_.processEvent.started()
 
@@ -380,10 +469,10 @@ var Subs_ = (function(ns) {
      * User has cancelled their subscription
      */
     
-    function cancelled(config) {
+    function cancelled() {
 
       log.functionEntryPoint()
-      return updateProperties(event.trial, SUBS_STATE.CANCELLED, config.oldTimeStarted)
+      return updateProperties(oldConfig.isTrial, SUBS_STATE.CANCELLED, oldConfig.timeStarted)
     
     } // Subs_.processEvent.newSubscription()
 
@@ -391,106 +480,64 @@ var Subs_ = (function(ns) {
      * The subscription timer has expired
      */
     
-    function expired(config) {
+    function expired() {
 
       log.functionEntryPoint()
-      
+
       // Ensure the user can only use the trial once
-      self.properties.setProperty(PROPERTY_TRIAL_FINISHED_, 'true')
+      if (oldConfig.isTrial) {
+        self.properties.setProperty(PROPERTY_.TRIAL_FINISHED, 'true')
+      }
       
-      return updateProperties(null, SUBS_STATE.EXPIRED, null)
+      return updateProperties(false, SUBS_STATE.EXPIRED, TIMER_NOT_STARTED)
     
     } // Subs_.processEvent.expired()
 
     /**
-     * The subscription has finshed and been acknowledged by the user
+     * The subscription is finished
      */
     
-    function noSub(config) {
+    function noSub() {
 
       log.functionEntryPoint()
-      return updateProperties(null, SUBS_STATE.NOSUB, null)
+      return updateProperties(false, SUBS_STATE.NOSUB, TIMER_NOT_STARTED)
     
     } // Subs_.processEvent.expired()
 
     /**
      * Update the user subscription properties
      *
-     * @param {boolean | object} trial or null to delete    
-     * @param {SUBS_STATE} status
-     * @param {number | object} timeStarted or null to delete
+     * @param {boolean | object} isTrial or null to delete    
+     * @param {SUBS_STATE} state
+     * @param {number | object} newTimeStarted or null to delete
      */ 
 
-    function updateProperties(newTrial, newState, newTimeStarted, trialFinished) {
+    function updateProperties(isTrial, state, timeStarted) {
     
       log.functionEntryPoint()
       
-      log.fine('newTrial: %s', newTrial)      
-      log.fine('newState: %s', newState)
-      log.fine('newTimeStarted: %s', newTimeStarted)
-      log.fine('trialFinished: %s', trialFinished)
+      log.fine('isTrial: %s',        isTrial)      
+      log.fine('newState: %s',       state)
+      log.fine('newTimeStarted: %s', timeStarted)
       
       var properties = self.properties
 
-      // Status
-      // ------
-      
-      set(PROPERTY_STATE_, newState)
-      
-      // isTrial
-      // -------
-      
-      if (typeof newTrial === 'boolean') {
-      
-        set(PROPERTY_TRIAL_, newTrial)
-        
-      } else if (typeof newTrial === 'object') {
-        
-        if (newTrial === null) {
-        
-          deleteP(PROPERTY_TRIAL_)     
-          
-        } else {
-         
-          error('Trying to set "trial" to bad object')
-        }
-        
-      } else {
-      
-        error('Trying to set "trial" to bad type')      
-      }
-      
-      // Trial finished
-      // --------------
-
-      if (trialFinished) {
-        set(PROPERTY_TRIAL_FINISHED_, 'true') 
-      }
-      
-      // Time started
-      // ------------
-      
-      if (typeof newTimeStarted === 'number') {
-      
-        set(PROPERTY_TIME_STARTED_, newTimeStarted)
-      
-      } else if (typeof newTimeStarted === 'object') {
-        
-        if (newTimeStarted === null) {
-        
-          deleteP(PROPERTY_TIME_STARTED_)      
-          
-        } else {
-        
-          error('Trying to set "trial" to bad object')
-        }
-      }
+      set(PROPERTY_.TRIAL, isTrial)
+      set(PROPERTY_.STATE, state)
+      set(PROPERTY_.TIMER, timeStarted)
       
       return ''
       
       // Private Functions
       // -----------------
-      
+
+      /**
+       * Set a property
+       *
+       * @param {PROPERTY_} property
+       * @param {object} value
+       */
+
       function set(property, value) {
       
         log.functionEntryPoint()
@@ -498,20 +545,6 @@ var Subs_ = (function(ns) {
       
       } // Subs_.processEvent.updateProperties.setProperty()
 
-      function deleteP(property) {
-      
-        log.functionEntryPoint()
-        properties.deleteProperty(property)
-      
-      } // Subs_.processEvent.updateProperties.deleteProperty()
-
-      function error(property) {
-      
-        log.functionEntryPoint()
-        self.throwError(property)
-      
-      } // Subs_.processEvent.updateProperties.error()
-      
     } // Subs_.processEvent.updateProperties()
 
   } // Subs_.processEvent_()
@@ -522,62 +555,53 @@ var Subs_ = (function(ns) {
    */
    
   ns.checkIfExpired = function() {
-  
+
+    checkInitialised(this)
     this.log.functionEntryPoint()
     var properties = this.properties
     
-    var status = this.getState()
-    var inTrial = this.isTrial()
+    var state = this.getState()
+    var isTrial = this.isTrial()
     
-    if (status !== SUBS_STATE.STARTED && status !== SUBS_STATE.CANCELLED) {
-      this.log.fine('Ignore this state: ' + status)
+    if (state !== SUBS_STATE.STARTED && state !== SUBS_STATE.CANCELLED) {
+      this.log.fine('Ignore this state: ' + state)
       return
     }
     
-    var startedString = properties.getProperty(PROPERTY_TIME_STARTED_)
+    var startedString = properties.getProperty(PROPERTY_.TIMER)
     
     if (startedString === null) {
-      this.throwError('User is in a trial, but the trial timer has been cleared')
+      throw new Error('User is in a trial, but the trial timer has been cleared')
     }
     
-    var started = parseFloat(startedString, 10)
+    var started = parseFloat(startedString)
     
-    // Test for NaN
     if (started !== started) {
-      this.throwError('The trial timer has been corrupted: ' + trialLength)      
+      throw new Error('The trial timer does not contain a number: ' + started)      
+    }
+    
+    this.log.fine('started: ' + started)
+    
+    if (started === TIMER_NOT_STARTED) {
+      this.log.warning('The "check expired" trigger is running, but the timer is not set')
+      return
     }
     
     var today = (new Date()).getTime()
     var totalTime = today - started
     
     if (totalTime < 0) {
-      this.throwError('The trial timer has been corrupted: ' + startedString)      
+      throw new Error('The trial timer was started after today?!: ' + totalTime)      
     }
     
-    var subLength
-    
-    if (inTrial) {
-      
-      subLength = this.trialLength
-      
-    } else {
-      
-      subLength = properties.fullLength
-    }
+    var subLength = isTrial ? this.trialLength : this.fullLength
     
     if (subLength === null) {
-      this.throwError('The subscription time length is not set')
-    }
-    
-    subLength = parseInt(subLength, 10)
-    
-    // Test for subLength
-    if (subLength !== subLength) {
-      this.throwError('The subscription time length has been corrupted: "' + subLength + '"')      
+      throw new Error('The subscription time length is not set')
     }
     
     if (totalTime > subLength) {
-      this.processEvent({event: SUBS_EVENT.EXPIRE, trial: inTrial})
+      this.processEvent({event: SUBS_EVENT.EXPIRE, isTrial: this.isTrial()})
     }
     
   } // Subs_.checkTrialExpired()
@@ -590,13 +614,13 @@ var Subs_ = (function(ns) {
    * @return {Object}
    */
    
-  ns.throwError = function handleError(message) {
+   function throwError(message) {
   
 // TODO -   
   
     this.log.functionEntryPoint()   
  /*   
-    if (config.oldState === SUBS_STATE.SUBSCRIBED && !config.oldTrial) {
+    if (config.oldState === SUBS_STATE.SUBSCRIBED && !config.isTrialOld) {
     
       // Leave "subscribed" 
       Subs_.processEvent_(SUBS_STATE.SUBSCRIBED)
@@ -607,12 +631,57 @@ var Subs_ = (function(ns) {
       Subs_.processEvent(SUBS_STATE.NEW) 
     }
 
-    this.properties.deleteProperty(PROPERTY_TIME_STARTED_)    
+    this.properties.deleteProperty(PROPERTY_.TIMER)    
 */    
     throw new Error(message)
   
-  } // Subs_.throwError()
+  } // Subs_.throw new Error()
 
+  /**
+   * Check that the Subs object has been initialised
+   */
+
+  function checkInitialised(config) {
+    
+    if (config.properties  === null ||
+        config.log         === null ||
+        config.trialLength === null ||
+        config.fullLength  === null) {
+        
+      throw new Error('The Subs object has not been initialised, call Subs.get() first')
+    }
+      
+  } // Subs_.checkInitialised()
+
+  /**
+   * Convert a string into a boolean
+   */
+   
+  function castBoolean(value) {
+  
+    var bool
+    
+    if (typeof value !== 'string') {
+      throw new Error('"value" is not a string: ' + value)      
+    }
+    
+    if (value === 'true') {     
+    
+      bool = true
+      
+    } else if (value === 'false') {
+    
+      bool = false
+      
+    } else {
+    
+      throw new Error('String is not a boolean: ' + value)
+    }
+  
+    return bool
+    
+  } // Subs_.castBoolean()
+   
   return ns
 
 })(Subs_ || {})
