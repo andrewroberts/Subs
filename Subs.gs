@@ -34,7 +34,6 @@
  TODO
  ----
 
- - Set PROPERTY_.TRIALLENGTH_ & PROPERTY_FULL_LENGTH_
  - Test trial expiration
  - Test trying to get two trials
  - Think about which situations warrant throwing an error, and which passing an
@@ -46,6 +45,7 @@
  - Add "trial finished" to updateProperties()
  - Start/stop expiration timer
  - Do we need the null states, rather than just true or false
+ - Check user has locked before processing event
 
 */
 
@@ -83,7 +83,8 @@ var PROPERTY_ = Object.freeze({
   STATE          : SCRIPT_NAME + '_State',          // {SUBS_STATE}
   TIMER          : SCRIPT_NAME + '_Timer',          // {number} mS
   TRIAL          : SCRIPT_NAME + '_Trial',          // {boolean}
-  TRIAL_FINISHED : SCRIPT_NAME + '_Trial_Finished', // {boolean} 
+  TRIAL_FINISHED : SCRIPT_NAME + '_Trial_Finished', // {boolean}
+  LOCK           : SCRIPT_NAME + '_Lock',           // {string} 'true' or 'false'
 })
 
 var TIMER_NOT_STARTED = -1
@@ -92,6 +93,8 @@ var MS_PER_DAY_ = 1000 * 60 * 60 * 24
 
 var DEFAULT_TRIAL_LENGTH_ = MS_PER_DAY_ * 15
 var DEFAULT_FULL_LENGTH_  = (MS_PER_DAY_ * 365) - DEFAULT_TRIAL_LENGTH_
+
+var LOCK_WAIT_ = 1000
 
 // Dummy logging object
 var Log_ = {
@@ -171,13 +174,14 @@ var Subs_ = (function(ns) {
     initialiseProperty(PROPERTY_.STATE, SUBS_STATE.NOSUB , OVERWRITE)
     initialiseProperty(PROPERTY_.TIMER, TIMER_NOT_STARTED, OVERWRITE)
     initialiseProperty(PROPERTY_.TRIAL, false            , OVERWRITE)
-    
+    initialiseProperty(PROPERTY_.LOCK,  'false'          , OVERWRITE)
+
     // PROPERTY_.TRIAL_FINISHED is persistent for this user so only initialise
     // if it hasn't been set yet
     initialiseProperty(PROPERTY_.TRIAL_FINISHED, false, DONT_OVERWRITE)
      
     initialiseSubLength('trialLength', DEFAULT_TRIAL_LENGTH_)
-    initialiseSubLength('fullLength', DEFAULT_FULL_LENGTH_)
+    initialiseSubLength('fullLength',  DEFAULT_FULL_LENGTH_)
  
     this.log.fine('New Subs: ' + JSON.stringify(this))
     
@@ -633,6 +637,9 @@ var Subs_ = (function(ns) {
 
     this.properties.deleteProperty(PROPERTY_.TIMER)    
 */    
+
+    releaseLock()
+
     throw new Error(message)
   
   } // Subs_.throw new Error()
@@ -642,7 +649,9 @@ var Subs_ = (function(ns) {
    */
 
   function checkInitialised(config) {
-    
+
+    this.log.functionEntryPoint()   
+
     if (config.properties  === null ||
         config.log         === null ||
         config.trialLength === null ||
@@ -658,7 +667,9 @@ var Subs_ = (function(ns) {
    */
    
   function castBoolean(value) {
-  
+
+    this.log.functionEntryPoint()   
+
     var bool
     
     if (typeof value !== 'string') {
@@ -681,7 +692,61 @@ var Subs_ = (function(ns) {
     return bool
     
   } // Subs_.castBoolean()
-   
+  
+  /**
+   * Get the lock
+   *
+   * @return {boolean} Whether lock has been got
+   */
+  
+  function getLock() {
+  
+    this.log.functionEntryPoint()   
+
+    var lock = this.properties.getProperty(PROPERTIES_.LOCK)
+    
+    if (lock === 'true') {
+    
+      this.log.fine('Having to wait for lock')
+      Utilities.sleep(LOCK_WAIT_)
+      lock = this.properties.getProperty(PROPERTIES_.LOCK)
+      
+      if (lock === 'true') {   
+        this.log.warning('Failed to get lock')
+        return false
+      }
+      
+    } else if (lock === 'false') {
+    
+      lock = this.properties.setProperty(PROPERTIES_.LOCK, 'true')
+      this.log.fine('Got lock')
+      return true
+          
+    } else {
+    
+      throw new Error('Lock property does not contain "true" or "false"')
+    }
+      
+  } // Subs_.getLock()
+
+  /**
+   * Release the lock
+   */
+  
+  function releaseLock() {
+  
+    this.log.functionEntryPoint()   
+
+    var lock = this.properties.getProperty(PROPERTIES_.LOCK)
+    this.log.fine('lock: ' + lock)
+    
+    if (lock === 'true') {
+      this.log.fine('Released lock')
+      this.properties.setProperty(PROPERTIES_.LOCK, 'false')
+    }
+    
+  } // Subs_.getLock()
+
   return ns
 
 })(Subs_ || {})
