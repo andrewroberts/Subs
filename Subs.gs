@@ -106,6 +106,41 @@ var Log_ = {
   warning            : function() {},
 }
 
+// User Guide
+// ----------
+
+/*
+
+See the script bound to the Subs Test sheet for example on using Subs - https://goo.gl/fb1ZDF.
+
+See the user manual (https://goo.gl/PtdTF9) for more details.
+
+  // Setup: Get a Subs object - See Subs_ description below
+  var sub = Subs.get({
+    properties  : PropertiesService.getScriptProperties(), 
+    log         : log,                                     
+    trialLength : 7,                                       
+    fullLength  : 180,                                     
+  })
+  .
+  .
+  .
+  // Process the start of a subscription - a START event, e.g. from a web app's UI
+  var response = sub.processEvent({event:SUBS_EVENT.START, isTrial: TRIAL_TRUE})
+  .
+  .
+  .
+  // Indirectly generate an EXPIRE event by regularly running checkIfExpired() 
+  sub.checkIfExpired()
+  .
+  .
+  .
+  // Process the user acknowledging the end of the subscription - an ACKNOWLEDGE event
+  var response = sub.processEvent({event:SUBS_EVENT.ACKNOWLEDGE})
+
+
+*/
+
 // Public Code
 // -----------
 
@@ -114,17 +149,17 @@ var Log_ = {
  *
  * @typedef {object} SubsEvent
  * @property {SUBS_EVENT} event - The Subs event
- * @property {boolean | object} isTrial - Whether this an event for a trial or null if N/A 
+ * @property {boolean} isTrial - Whether this an event for a trial or not [OPTIONAL, DEFAULT: false]
  */
 
 /**
  * The Subs_ event parameter object
  *
  * @typedef {object} SubsGetConfig
- * @property {number} trialLength - The length of a trial in days
- * @property {number} fullLength - The length of a trial in days 
- * @property {PropertiesService} properties - PropertiesService
- * @property {BBLog} log - Logging object
+ * @property {number} trialLength - The length of a trial in days [OPTIONAL, DEFAULT: 15]
+ * @property {number} fullLength - The length of a full subscription in days [OPTIONAL, DEFAULT: 350]
+ * @property {PropertiesService} properties - Any service with an API similar to a PropertiesService
+ * @property {BBLog} log - A logging service with the same API as BBLog (github.com/andrewroberts/BBLog)
  */
 
 /**
@@ -161,12 +196,12 @@ var Subs_ = (function(ns) {
 
     var self = this
 
-    this.log = config.log || Log_
-    var log = this.log
+    ns.log = config.log || Log_
+    var log = ns.log
     log.functionEntryPoint()
 
     checkProperties()
-    this.properties = config.properties
+    ns.properties = config.properties
     
     var OVERWRITE      = true
     var DONT_OVERWRITE = false
@@ -183,7 +218,7 @@ var Subs_ = (function(ns) {
     initialiseSubLength('trialLength', DEFAULT_TRIAL_LENGTH_)
     initialiseSubLength('fullLength',  DEFAULT_FULL_LENGTH_)
  
-    this.log.fine('New Subs: ' + JSON.stringify(this))
+    ns.log.fine('New Subs: ' + JSON.stringify(this))
     
     return Object.create(this)
     
@@ -259,10 +294,10 @@ var Subs_ = (function(ns) {
    
   ns.getState = function() {
   
-    checkInitialised(this)
-    this.log.functionEntryPoint()
+    checkInitialised()
+    ns.log.functionEntryPoint()
     
-    var state = parseInt(this.properties.getProperty(PROPERTY_.STATE), 10)
+    var state = parseInt(ns.properties.getProperty(PROPERTY_.STATE), 10)
     
     if (state !== state) {  
       throw new Error('Subs state is not a number: ' +  state)
@@ -272,7 +307,7 @@ var Subs_ = (function(ns) {
       throw new Error('Subs state is outside expected range: ' +  state)
     }
    
-    this.log.fine('state: ' + state)
+    ns.log.fine('state: ' + state)
     return state
   
   } // Subs_.getState() 
@@ -283,17 +318,17 @@ var Subs_ = (function(ns) {
      
   ns.isTrial = function() {
   
-    checkInitialised(this)
-    this.log.functionEntryPoint()
+    checkInitialised()
+    ns.log.functionEntryPoint()
     
-    var trial = this.properties.getProperty(PROPERTY_.TRIAL)
+    var trial = ns.properties.getProperty(PROPERTY_.TRIAL)
     
     if (typeof trial !== 'string') {
       throw new Error('Sub has not been initialsed, call Subs_.get() first')
     }
 
     trial = castBoolean(trial)
-    this.log.fine('isTrial: ' + trial)
+    ns.log.fine('isTrial: ' + trial)
     return trial
   
   } // Subs_.isTrial() 
@@ -304,17 +339,17 @@ var Subs_ = (function(ns) {
 
   ns.isTrialFinished = function() {
   
-    checkInitialised(this)  
-    this.log.functionEntryPoint()
+    checkInitialised()  
+    ns.log.functionEntryPoint()
 
-    var trialFinished = this.properties.getProperty(PROPERTY_.TRIAL_FINISHED)
+    var trialFinished = ns.properties.getProperty(PROPERTY_.TRIAL_FINISHED)
 
     if (typeof trialFinished !== 'string') {
       throw new Error('Sub has not been initialsed, call Subs_.get() first')
     }
 
     trialFinished = castBoolean(trialFinished)
-    this.log.fine('trialFinished: ' + trialFinished)
+    ns.log.fine('trialFinished: ' + trialFinished)
     return trialFinished
   
   } // Subs_.isTrialFinished()
@@ -327,10 +362,10 @@ var Subs_ = (function(ns) {
    
   ns.getTimeTimerStarted = function() {
   
-    checkInitialised(this)  
-    this.log.functionEntryPoint()
+    checkInitialised()  
+    ns.log.functionEntryPoint()
 
-    var timeStarted = parseFloat(this.properties.getProperty(PROPERTY_.TIMER))
+    var timeStarted = parseFloat(ns.properties.getProperty(PROPERTY_.TIMER))
       
     if (timeStarted !== timeStarted) {       
       throw new Error('Subs time started is not a number: ' +  timeStarted)
@@ -344,16 +379,16 @@ var Subs_ = (function(ns) {
    * Process a new "subscription" event 
    *
    * @param {Object} event
-   *   {SUBS_EVENT_} event
-   *   {boolean} isTrial
+   *   {SUBS_EVENT} event
+   *   {boolean} isTrial [OPTIONAL, DEFAULT: false]
    *
    * @return {String} errorMessage or ''
    */
 
   ns.processEvent = function(event) {
   
-    checkInitialised(this)  
-    var log = this.log    
+    checkInitialised()  
+    var log = ns.log    
     log.functionEntryPoint()
     log.fine('event: ' + JSON.stringify(event))
     
@@ -371,17 +406,25 @@ var Subs_ = (function(ns) {
       /* 3. EXPIRED   */  [started,    noAction,     noAction,    noSub ]
     ]
     
-    var oldConfig = {
-      isTrial         : event.isTrial,
-      isTrialFinished : this.isTrialFinished(),
-      state           : this.getState(),
-      timeStarted     : this.getTimeTimerStarted(),
+    if (!getLock()) {
+      return
     }
     
-    this.log.fine('oldConfig: ' + JSON.stringify(oldConfig))
+    var oldConfig = {
+      isTrial         : event.isTrial || false,
+      isTrialFinished : ns.isTrialFinished(),
+      state           : ns.getState(),
+      timeStarted     : ns.getTimeTimerStarted(),
+    }
+    
+    ns.log.fine('oldConfig: ' + JSON.stringify(oldConfig))
     
     // Call the appropriate action function for this state/event combination
-    return SUBS_TABLE[oldConfig.state][event.event - EVENT_OFFSET_]()
+    var message = SUBS_TABLE[oldConfig.state][event.event - EVENT_OFFSET_]()
+
+    releaseLock()
+
+    return message
 
     // Private Functions
     // -----------------
@@ -396,16 +439,12 @@ var Subs_ = (function(ns) {
         throw new Error('"event" is not an object: ' + event)      
       }
       
-      if (!event.hasOwnProperty('event') || !event.hasOwnProperty('isTrial')) {
+      if (!event.hasOwnProperty('event')) {
         throw new Error('"event" does not have the expected properties: ' + JSON.stringify(event))            
       }
   
       if (typeof event.event !== 'number') {
         throw new Error('"event.event" is not a number: ' + event.event)                  
-      }
-  
-      if (typeof event.isTrial !== 'boolean') {
-        throw new Error('"event.trial" is not a boolean: ' + event.isTrial)                  
       }
   
       if (event.event < EVENT_OFFSET_) {
@@ -555,20 +594,21 @@ var Subs_ = (function(ns) {
   
   /**
    * Check if subscription expired - this needs to be automatically 
-   * run daily
+   * run daily. If a subscription has expired an EXPIRE event will 
+   * be generated.
    */
    
   ns.checkIfExpired = function() {
 
-    checkInitialised(this)
-    this.log.functionEntryPoint()
-    var properties = this.properties
+    checkInitialised()
+    ns.log.functionEntryPoint()
+    var properties = ns.properties
     
-    var state = this.getState()
-    var isTrial = this.isTrial()
+    var state = ns.getState()
+    var isTrial = ns.isTrial()
     
     if (state !== SUBS_STATE.STARTED && state !== SUBS_STATE.CANCELLED) {
-      this.log.fine('Ignore this state: ' + state)
+      ns.log.fine('Ignore this state: ' + state)
       return
     }
     
@@ -584,10 +624,10 @@ var Subs_ = (function(ns) {
       throw new Error('The trial timer does not contain a number: ' + started)      
     }
     
-    this.log.fine('started: ' + started)
+    ns.log.fine('started: ' + started)
     
     if (started === TIMER_NOT_STARTED) {
-      this.log.warning('The "check expired" trigger is running, but the timer is not set')
+      ns.log.warning('The "check expired" trigger is running, but the timer is not set')
       return
     }
     
@@ -598,14 +638,14 @@ var Subs_ = (function(ns) {
       throw new Error('The trial timer was started after today?!: ' + totalTime)      
     }
     
-    var subLength = isTrial ? this.trialLength : this.fullLength
+    var subLength = isTrial ? ns.trialLength : ns.fullLength
     
     if (subLength === null) {
       throw new Error('The subscription time length is not set')
     }
     
     if (totalTime > subLength) {
-      this.processEvent({event: SUBS_EVENT.EXPIRE, isTrial: this.isTrial()})
+      ns.processEvent({event: SUBS_EVENT.EXPIRE, isTrial: ns.isTrial()})
     }
     
   } // Subs_.checkTrialExpired()
@@ -622,7 +662,7 @@ var Subs_ = (function(ns) {
   
 // TODO -   
   
-    this.log.functionEntryPoint()   
+    ns.log.functionEntryPoint()   
  /*   
     if (config.oldState === SUBS_STATE.SUBSCRIBED && !config.isTrialOld) {
     
@@ -635,7 +675,7 @@ var Subs_ = (function(ns) {
       Subs_.processEvent(SUBS_STATE.NEW) 
     }
 
-    this.properties.deleteProperty(PROPERTY_.TIMER)    
+    ns.properties.deleteProperty(PROPERTY_.TIMER)    
 */    
 
     releaseLock()
@@ -648,14 +688,14 @@ var Subs_ = (function(ns) {
    * Check that the Subs object has been initialised
    */
 
-  function checkInitialised(config) {
+  function checkInitialised() {
 
-    this.log.functionEntryPoint()   
+    ns.log.functionEntryPoint()   
 
-    if (config.properties  === null ||
-        config.log         === null ||
-        config.trialLength === null ||
-        config.fullLength  === null) {
+    if (ns.properties  === null ||
+        ns.log         === null ||
+        ns.trialLength === null ||
+        ns.fullLength  === null) {
         
       throw new Error('The Subs object has not been initialised, call Subs.get() first')
     }
@@ -668,7 +708,7 @@ var Subs_ = (function(ns) {
    
   function castBoolean(value) {
 
-    this.log.functionEntryPoint()   
+    ns.log.functionEntryPoint()   
 
     var bool
     
@@ -701,31 +741,44 @@ var Subs_ = (function(ns) {
   
   function getLock() {
   
-    this.log.functionEntryPoint()   
+    ns.log.functionEntryPoint()   
 
-    var lock = this.properties.getProperty(PROPERTIES_.LOCK)
+    var locked = ns.properties.getProperty(PROPERTY_.LOCK)
+    var gotLock
     
-    if (lock === 'true') {
+    if (locked === 'true') {
     
-      this.log.fine('Having to wait for lock')
+      ns.log.fine('Having to wait for lock')
       Utilities.sleep(LOCK_WAIT_)
-      lock = this.properties.getProperty(PROPERTIES_.LOCK)
+      locked = ns.properties.getProperty(PROPERTY_.LOCK)
       
-      if (lock === 'true') {   
-        this.log.warning('Failed to get lock')
-        return false
+      if (locked === 'true') {  
+      
+        ns.log.warning('Failed to get lock')
+        gotLock = false
+        
+      } else if (locked === 'false') {
+
+        ns.log.fine('Got lock')
+        gotLock = true
+        
+      } else {
+      
+        throw new Error('Lock property does not contain "true" or "false"')
       }
       
-    } else if (lock === 'false') {
+    } else if (locked === 'false') {
     
-      lock = this.properties.setProperty(PROPERTIES_.LOCK, 'true')
-      this.log.fine('Got lock')
-      return true
+      ns.properties.setProperty(PROPERTY_.LOCK, 'true')
+      ns.log.fine('Got lock')
+      gotLock = true
           
     } else {
     
       throw new Error('Lock property does not contain "true" or "false"')
     }
+      
+    return gotLock
       
   } // Subs_.getLock()
 
@@ -735,17 +788,25 @@ var Subs_ = (function(ns) {
   
   function releaseLock() {
   
-    this.log.functionEntryPoint()   
+    ns.log.functionEntryPoint()   
 
-    var lock = this.properties.getProperty(PROPERTIES_.LOCK)
-    this.log.fine('lock: ' + lock)
+    var locked = ns.properties.getProperty(PROPERTY_.LOCK)
     
-    if (lock === 'true') {
-      this.log.fine('Released lock')
-      this.properties.setProperty(PROPERTIES_.LOCK, 'false')
+    if (locked === 'true') {
+    
+      ns.properties.setProperty(PROPERTY_.LOCK, 'false')
+      ns.log.fine('Released lock')
+            
+    } else if (locked === 'false') {
+
+      ns.log.warning('Lock already released')
+      
+    } else {
+    
+      throw new Error('Lock property does not contain "true" or "false"')
     }
     
-  } // Subs_.getLock()
+  } // Subs_.releaseLock()
 
   return ns
 
