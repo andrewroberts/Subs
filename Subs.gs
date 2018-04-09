@@ -139,13 +139,13 @@ See the user manual (goo.gl/PtdTF9) for more details.
  */
 
 /**
- * The Subs_ event parameter object
+ * The Subs_ config event parameter object
  *
  * @typedef {object} SubsGetConfig
  * @property {number} trialLength - The length of a trial in days [OPTIONAL, DEFAULT: 15]
  * @property {number} fullLength - The length of a full subscription in days [OPTIONAL, DEFAULT: 350]
  * @property {PropertiesService} properties - Any service with an API similar to a PropertiesService
- * @property {BBLog} log - A logging service with the same API as BBLog (github.com/andrewroberts/BBLog)
+ * @property {BBLog} log - A logging service with the same API as BBLog (github.com/andrewroberts/BBLog) [OPTIONAL]
  */
 
 /**
@@ -171,6 +171,20 @@ var Subs_ = (function(ns) {
   ns.fullLength  = null
 
   /**
+   * Reset the internal config
+   */
+   
+  ns.reset = function() {
+  
+    ns.properties.deleteProperty(PROPERTY_.STATE)
+    ns.properties.deleteProperty(PROPERTY_.TIMER)
+    ns.properties.deleteProperty(PROPERTY_.TRIAL)
+    ns.properties.deleteProperty(PROPERTY_.LOCK)
+    ns.properties.deleteProperty(PROPERTY_.TRIAL_FINISHED)
+  
+  } // Subs_.reset()
+  
+  /**
    * Private method to get a subscription object
    *
    * @param {SubsGetConfig} config - {@link SubsGetConfig} 
@@ -185,27 +199,20 @@ var Subs_ = (function(ns) {
     ns.log = config.log || Log_
     var log = ns.log
     log.functionEntryPoint()
+    log.fine('config: ' + JSON.stringify(config))
 
     checkProperties()
     ns.properties = config.properties
     
-    var OVERWRITE      = true
-    var DONT_OVERWRITE = false
-    
-    initialiseProperty(PROPERTY_.STATE, SUBS_STATE.NOSUB , OVERWRITE)
-    initialiseProperty(PROPERTY_.TIMER, TIMER_NOT_STARTED, OVERWRITE)
-    initialiseProperty(PROPERTY_.TRIAL, false            , OVERWRITE)
-    initialiseProperty(PROPERTY_.LOCK,  'false'          , OVERWRITE)
-
-    // PROPERTY_.TRIAL_FINISHED is persistent for this user so only initialise
-    // if it hasn't been set yet
-    initialiseProperty(PROPERTY_.TRIAL_FINISHED, false, DONT_OVERWRITE)
+    initialiseProperty(PROPERTY_.STATE,          SUBS_STATE.NOSUB)
+    initialiseProperty(PROPERTY_.TIMER,          TIMER_NOT_STARTED)
+    initialiseProperty(PROPERTY_.TRIAL,          false)
+    initialiseProperty(PROPERTY_.LOCK,           false)
+    initialiseProperty(PROPERTY_.TRIAL_FINISHED, false)
      
     initialiseSubLength('trialLength', DEFAULT_TRIAL_LENGTH_)
     initialiseSubLength('fullLength',  DEFAULT_FULL_LENGTH_)
- 
-    ns.log.fine('New Subs: ' + JSON.stringify(this))
-    
+     
     return Object.create(this)
     
     // Private Functions
@@ -230,20 +237,18 @@ var Subs_ = (function(ns) {
      *
      * @param {PROPERTY_} name
      * @param {object} value
-     * @param {boolean} overwrite
      */
      
-    function initialiseProperty(name, value, overwrite) {
+    function initialiseProperty(name, value) {
 
       log.functionEntryPoint()
 
-      var properties = self.properties
-
-      if (properties.getProperty(name) !== null && !overwrite) {
+      if (self.properties.getProperty(name) !== null) {
         return
       }
 
-      properties.setProperty(name, value)
+      self.properties.setProperty(name, value)
+      log.fine('Set property "' + name + '" to "' + value + '"')
 
     } // Subs_.get.initialiseProperty()
 
@@ -492,7 +497,7 @@ var Subs_ = (function(ns) {
           }
         }
         
-        message = updateProperties(event.isTrial, SUBS_STATE.STARTED, datetime)
+        message = updateProperties(oldConfig.isTrial, SUBS_STATE.STARTED, datetime)
       }
       
       return message
