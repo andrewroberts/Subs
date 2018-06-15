@@ -11,6 +11,9 @@
 // Dev: AndrewRoberts.net
 //
 // Object for managing user subscriptions
+//
+// NOTE: This is always used as a library so although it is passed a BBLog
+// logging object do not every log anything higher than "fine".
 
 /*
 
@@ -34,7 +37,7 @@
 // -------------
 
 var SCRIPT_NAME    = "Subs"
-var SCRIPT_VERSION = "v1.0.dev"
+var SCRIPT_VERSION = "v0.dev_ajr"
 
 // The number is used as an index into an action table
 
@@ -72,8 +75,8 @@ var TIMER_NOT_STARTED = -1
 
 var MS_PER_DAY_ = 1000 * 60 * 60 * 24
 
-var DEFAULT_TRIAL_LENGTH_ = MS_PER_DAY_ * 15
-var DEFAULT_FULL_LENGTH_  = (MS_PER_DAY_ * 365) - DEFAULT_TRIAL_LENGTH_
+var DEFAULT_TRIAL_LENGTH_IN_MS_ = MS_PER_DAY_ * 15
+var DEFAULT_FULL_LENGTH_IN_MS_  = MS_PER_DAY_ * 365
 
 var LOCK_WAIT_ = 1000
 
@@ -170,6 +173,9 @@ var Subs_ = (function(ns) {
   ns.trialLength = null
   ns.fullLength  = null
 
+  // Public Methods
+  // --------------
+
   /**
    * Reset the internal config
    */
@@ -210,8 +216,8 @@ var Subs_ = (function(ns) {
     initialiseProperty(PROPERTY_.LOCK,           false)
     initialiseProperty(PROPERTY_.TRIAL_FINISHED, false)
      
-    initialiseSubLength('trialLength', DEFAULT_TRIAL_LENGTH_)
-    initialiseSubLength('fullLength',  DEFAULT_FULL_LENGTH_)
+    initialiseSubLength('trialLength', DEFAULT_TRIAL_LENGTH_IN_MS_)
+    initialiseSubLength('fullLength',  DEFAULT_FULL_LENGTH_IN_MS_)
      
     return Object.create(this)
     
@@ -265,7 +271,7 @@ var Subs_ = (function(ns) {
 
       if (!config.hasOwnProperty(name)) {
       
-        self.log.warning('Using default ' + name + ': ' + (defaultValue / MS_PER_DAY_))
+        self.log.fine('Using default ' + name + ': ' + (defaultValue / MS_PER_DAY_))
         self[name] = defaultValue
         
       } else {
@@ -315,11 +321,11 @@ var Subs_ = (function(ns) {
     var trial = ns.properties.getProperty(PROPERTY_.TRIAL)
     
     if (typeof trial !== 'string') {
-      throw new Error('Sub has not been initialsed, call Subs_.get() first')
+      throw new Error('Subs has not been initialsed, call Subs_.get() first')
     }
 
     trial = castBoolean(trial)
-    ns.log.fine('isTrial: ' + trial)
+    ns.log.fine('isTrial: ' + trial + ' (' + typeof trial + ')')
     return trial
   
   } // Subs_.isTrial() 
@@ -332,15 +338,8 @@ var Subs_ = (function(ns) {
   
     checkInitialised()  
     ns.log.functionEntryPoint()
-
-    var trialFinished = ns.properties.getProperty(PROPERTY_.TRIAL_FINISHED)
-
-    if (typeof trialFinished !== 'string') {
-      throw new Error('Sub has not been initialsed, call Subs_.get() first')
-    }
-
-    trialFinished = castBoolean(trialFinished)
-    ns.log.fine('trialFinished: ' + trialFinished)
+    var trialFinished = castBoolean(ns.properties.getProperty(PROPERTY_.TRIAL_FINISHED)) 
+    ns.log.fine('trialFinished: ' + trialFinished + ' (' + typeof trialFinished + ')')
     return trialFinished
   
   } // Subs_.isTrialFinished()
@@ -398,7 +397,7 @@ var Subs_ = (function(ns) {
     ]
     
     if (!getLock()) {
-      return
+      return ''
     }
 
     try {
@@ -607,21 +606,9 @@ var Subs_ = (function(ns) {
       ns.log.fine('Ignore this state: ' + state)
       return
     }
-    
-    var startedString = properties.getProperty(PROPERTY_.TIMER)
-    
-    if (startedString === null) {
-      throw new Error('User is in a trial, but the trial timer has been cleared')
-    }
-    
-    var started = parseFloat(startedString)
-    
-    if (started !== started) {
-      throw new Error('The trial timer does not contain a number: ' + started)      
-    }
-    
-    ns.log.fine('started: ' + started)
-    
+   
+    var started = getStartedTime()
+       
     if (started === TIMER_NOT_STARTED) {
       ns.log.warning('The "check expired" trigger is running, but the timer is not set')
       return
@@ -645,6 +632,47 @@ var Subs_ = (function(ns) {
     }
     
   } // Subs_.checkTrialExpired()
+
+  /**
+   * @return {number} the number of days left in the subscription
+   */
+  
+  ns.getSubscriptionLeft = function() {
+
+    checkInitialised()
+    ns.log.functionEntryPoint()
+    
+    var subscriptionStartedInMs = getStartedTime()
+    
+    if (subscriptionStartedInMs === TIMER_NOT_STARTED) {
+      return 0
+    }
+    
+    var todayInMs = (new Date()).getTime()
+    var timeRunningMs = todayInMs - subscriptionStartedInMs
+    ns.log.fine('timeRunningMs: ' + timeRunningMs)
+    
+    var totalSubscriptionLengthInMs = DEFAULT_FULL_LENGTH_IN_MS_
+
+    if (ns.isTrial()) {
+      totalSubscriptionLengthInMs = DEFAULT_TRIAL_LENGTH_IN_MS_
+    }
+    
+    if (timeRunningMs > totalSubscriptionLengthInMs) {
+      ns.processEvent({event: SUBS_EVENT.EXPIRE, isTrial: ns.isTrial()})
+      return 0
+    }
+    
+    ns.log.fine('totalSubscriptionLengthInMs: ' + totalSubscriptionLengthInMs)
+    
+    var timeLeftInDays = Math.round((totalSubscriptionLengthInMs - timeRunningMs) / MS_PER_DAY_)
+    ns.log.fine('timeLeftInDays: ' + timeLeftInDays)
+    return timeLeftInDays
+     
+  } // Subs_.getSubscriptionLeft()
+
+  // Private Functions
+  // -----------------
 
   /**
    * Check that the Subs object has been initialised
@@ -767,8 +795,29 @@ var Subs_ = (function(ns) {
     
       throw new Error('Lock property does not contain "true" or "false"')
     }
-    
+
   } // Subs_.releaseLock()
+
+  /**
+   * Get when the subscription timer started in ms from epoch
+   */
+  
+  function getStartedTime() {
+
+    ns.log.functionEntryPoint()   
+
+    var startedString = ns.properties.getProperty(PROPERTY_.TIMER)    
+    var started = parseFloat(startedString)
+    
+    if (started !== started) {
+      throw new Error('The trial timer does not contain a number: ' + started)      
+    }
+    
+    ns.log.fine('started: ' + started)
+    
+    return started
+
+  } // Subs_.getStartedTime()
 
   return ns
 
