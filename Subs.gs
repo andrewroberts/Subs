@@ -253,7 +253,9 @@ var Subs_ = (function(ns) {
         return
       }
 
-      self.properties.setProperty(name, value)
+      // Everything is stored in as a string. This mimics PropertiesService 
+      // whatever actually is used.
+      self.properties.setProperty(name, value.toString())
       log.fine('Set property "' + name + '" to "' + value + '"')
 
     } // Subs_.get.initialiseProperty()
@@ -321,7 +323,7 @@ var Subs_ = (function(ns) {
     var trial = ns.properties.getProperty(PROPERTY_.TRIAL)
     
     if (typeof trial !== 'string') {
-      throw new Error('Subs has not been initialsed, call Subs_.get() first')
+      throw new Error('non string value stored for "isTrial"')
     }
 
     trial = castBoolean(trial)
