@@ -75,8 +75,11 @@ var TIMER_NOT_STARTED = -1
 
 var MS_PER_DAY_ = 1000 * 60 * 60 * 24
 
-var DEFAULT_TRIAL_LENGTH_IN_MS_ = MS_PER_DAY_ * 15
-var DEFAULT_FULL_LENGTH_IN_MS_  = MS_PER_DAY_ * 365
+// var DEFAULT_TRIAL_LENGTH_IN_MS_ = MS_PER_DAY_ * 15
+// var DEFAULT_FULL_LENGTH_IN_MS_  = MS_PER_DAY_ * 365
+
+var DEFAULT_TRIAL_LENGTH_IN_MS_ = MS_PER_DAY_ * 1
+var DEFAULT_FULL_LENGTH_IN_MS_  = MS_PER_DAY_ * 2
 
 var LOCK_WAIT_ = 1000
 
@@ -801,18 +804,23 @@ var Subs_ = (function(ns) {
   } // Subs_.releaseLock()
 
   /**
-   * Get when the subscription timer started in ms from epoch
+   * @return {number} When the subscription timer started in ms from epoch
    */
   
   function getStartedTime() {
 
     ns.log.functionEntryPoint()   
 
-    var startedString = ns.properties.getProperty(PROPERTY_.TIMER)    
-    var started = parseFloat(startedString)
+    var startedString = ns.properties.getProperty(PROPERTY_.TIMER)
+    var started = TIMER_NOT_STARTED
+
+    if (startedString !== null) {
     
-    if (started !== started) {
-      throw new Error('The trial timer does not contain a number: ' + started)      
+      started = parseFloat(startedString)
+      
+      if (started !== started) {
+        throw new Error('The trial timer does not contain a number: ' + started)      
+      }
     }
     
     ns.log.fine('started: ' + started)
