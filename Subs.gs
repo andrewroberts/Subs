@@ -37,7 +37,7 @@
 // -------------
 
 var SCRIPT_NAME    = "Subs"
-var SCRIPT_VERSION = "v0.dev_ajr"
+var SCRIPT_VERSION = "v1.0"
 
 // The number is used as an index into an action table
 
