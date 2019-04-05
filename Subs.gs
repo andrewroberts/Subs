@@ -37,7 +37,7 @@
 // -------------
 
 var SCRIPT_NAME    = "Subs"
-var SCRIPT_VERSION = "v1.0"
+var SCRIPT_VERSION = "v1.1"
 
 // The number is used as an index into an action table
 
@@ -385,8 +385,10 @@ var Subs_ = (function(ns) {
     checkInitialised()  
     var log = ns.log    
     log.functionEntryPoint()
-    log.fine('event: ' + JSON.stringify(event))
-    
+
+    log.fine('event.event: ' + event.event)
+    log.fine('event.isTrial: ' + event.isTrial + ' (' + typeof event.isTrial + ')')
+
     checkParameters()
     
     var self = this
@@ -448,7 +450,11 @@ var Subs_ = (function(ns) {
       }
   
       if (event.event < EVENT_OFFSET_) {
-        throw new Error('Event value is less than the offset: ' + event)
+        throw new Error('Event value - ' + event + ' is less than the expected offset of ' + EVENT_OFFSET_)
+      }
+      
+      if (event.hasOwnProperty('isTrial') && typeof event.isTrial !== 'boolean') {
+        throw new Error('The "event.isTrial" is not a boolean but a "' + typeof event.isTrial + '"')
       }
       
     } // Subs_.processEvent.checkParameters()
@@ -526,9 +532,12 @@ var Subs_ = (function(ns) {
     function expired() {
 
       log.functionEntryPoint()
+      
+      log.fine('oldConfig.isTrial: ' + oldConfig.isTrial + ' (' + typeof oldConfig.isTrial + ')')
 
       // Ensure the user can only use the trial once
       if (oldConfig.isTrial) {
+        log.fine('Flag trial as finished')
         self.properties.setProperty(PROPERTY_.TRIAL_FINISHED, 'true')
       }
       
@@ -618,15 +627,19 @@ var Subs_ = (function(ns) {
       ns.log.warning('The "check expired" trigger is running, but the timer is not set')
       return
     }
-    
+        
     var today = (new Date()).getTime()
     var totalTime = today - started
     
+    ns.log.fine('started: ' + started + ', today: ' + today + ', totalTime: ' + totalTime)
+
     if (totalTime < 0) {
       throw new Error('The trial timer was started after today?!: ' + totalTime)      
     }
     
     var subLength = isTrial ? ns.trialLength : ns.fullLength
+    
+    ns.log.fine('subLength: ' + subLength)
     
     if (subLength === null) {
       throw new Error('The subscription time length is not set')
